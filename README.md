@@ -1,0 +1,1 @@
+### Projeto desenvolvido para facilitar a implementação da arquitetura limpa.
