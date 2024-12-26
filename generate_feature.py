@@ -75,12 +75,16 @@ class {Feature}Router {
 
 PAGE_TEMPLATE = """
 import 'package:flutter/material.dart';
+import 'package:get_it/get_it.dart';
+
+import '../../_{feature}.dart';
 
 class {Feature}Page extends StatelessWidget {
   const {Feature}Page({super.key});
 
   @override
   Widget build(BuildContext context) {
+    final cubit = GetIt.I.get<{Feature}Cubit>();
     return const Scaffold();
   }
 }
@@ -91,9 +95,32 @@ abstract class {Feature}Repository {}
 """
 
 DATASOURCE_IMPL_TEMPLATE = """
+import 'package:dio/dio.dart' as dio;
+
+import '../../../../core/_core.dart';
 import '../../_{feature}.dart';
 
-class {Feature}DatasourceImpl implements {Feature}Datasource {}
+class {Feature}DatasourceImpl implements {Feature}Datasource {
+    {Feature}DatasourceImpl({required dio.Dio httpClient, required AppStorage storage})
+      : _httpClient = httpClient,
+        _storage = storage;
+
+  final dio.Dio _httpClient;
+  final AppStorage _storage;
+
+  Future<dio.Options> getOptions() async {
+    String? token;
+    final authResponse = await _storage.getAuthResponse();
+    if (authResponse != null) {
+      token = authResponse.token;
+    }
+
+    final Map<String, dynamic> headers = {
+      token != null ? 'Authorization' : '': token != null ? 'Bearer $token' : '',
+    };
+    return dio.Options(headers: headers, responseType: dio.ResponseType.json);
+  }
+}
 """
 
 DATASOURCE_TEMPLATE = """
@@ -103,8 +130,95 @@ abstract class {Feature}Datasource {}
 REPOSITORY_IMPL_TEMPLATE = """
 import '../../_{feature}.dart';
 
-class {Feature}RepositoryImpl implements {Feature}Repository {}
+class {Feature}RepositoryImpl implements {Feature}Repository {
+    {Feature}RepositoryImpl({required {Feature}Datasource datasource}) : _datasource = datasource;
+
+    final {Feature}Datasource _datasource;
+}
 """
+
+SETUP_LOCATOR_TEMPLATE = """
+import 'package:dio/dio.dart';
+import 'package:get_it/get_it.dart';
+
+import '../../core/_core.dart';
+import '_{feature}.dart';
+
+class {Feature}SetupLocator {
+  void _datasource(GetIt instance) {
+    // Registre aqui os datasources
+    instance.registerLazySingleton<{Feature}Datasource>(
+      () => {Feature}DatasourceImpl(
+        httpClient: instance.get<Dio>(),
+        storage: instance.get<AppStorage>(),
+      ),
+    );
+  }
+
+  void _repository(GetIt instance) {
+    // Registre aqui os repositórios
+    instance.registerLazySingleton<{Feature}Repository>(
+      () => {Feature}RepositoryImpl(datasource: instance.get<{Feature}Datasource>()),
+    );
+  }
+
+  void _usecase(GetIt instance) {
+    // Registre aqui os casos de uso
+  }
+
+  void _cubit(GetIt instance) {
+    // Registre aqui os cubits
+    instance.registerFactory<{Feature}Cubit>(
+      () => {Feature}Cubit(),
+    );
+  }
+
+  void call(GetIt instance) {
+    _datasource(instance);
+    _repository(instance);
+    _usecase(instance);
+    _cubit(instance);
+  }
+}
+"""
+
+STATE_TEMPLATE = """
+part of '{feature}.cubit.dart';
+
+abstract class {Feature}State extends Equatable { 
+    const {Feature}State();
+
+    @override List<Object> get props => []; 
+}
+
+class {Feature}Initial extends {Feature}State {}
+
+class {Feature}Loading extends {Feature}State {}
+
+class {Feature}Success extends {Feature}State {}
+
+class {Feature}KycRequired extends {Feature}State {}
+
+class {Feature}Error extends {Feature}State { 
+    final String message;
+
+    const {Feature}Error(this.message);
+
+    @override List<Object> get props => [message]; 
+} 
+"""
+
+CUBIT_TEMPLATE = """
+import 'package:bloc/bloc.dart';
+import 'package:equatable/equatable.dart';
+
+part '{feature}.state.dart';
+
+class {Feature}Cubit extends Cubit<{Feature}State> {
+{Feature}Cubit() : super({Feature}Initial());
+}
+"""
+
 
 EXPORT_TEMPLATES = {
     "_{feature}.dart": [
@@ -143,7 +257,6 @@ EXPORT_TEMPLATES = {
     ],
     "_controller.dart": [
         "export '{feature}.cubit.dart';",
-        "export '{feature}.state.dart';",
     ],
     "_page.dart": [
         "export '{feature}.page.dart';",
@@ -185,7 +298,15 @@ def create_feature_structure(base_path, feature_name):
                 os.makedirs(folder_path, exist_ok=True)
                 for filename in value:
                     filepath = os.path.join(folder_path, filename.replace("{feature}", feature_name))
-                    if filename == "{feature}.repository.dart":
+                    if filename == "{feature}.state.dart":
+                        # Gera o arquivo state com o template
+                        content = STATE_TEMPLATE.replace("{feature}", feature_name).replace("{Feature}", feature_name.capitalize())
+                        create_file(filepath, content)
+                    elif filename == "{feature}.cubit.dart":
+                        # Gera o arquivo cubit com o template
+                        content = CUBIT_TEMPLATE.replace("{feature}", feature_name).replace("{Feature}", feature_name.capitalize())
+                        create_file(filepath, content)
+                    elif filename == "{feature}.repository.dart":
                         content = REPOSITORY_TEMPLATE.replace("{feature}", feature_name).replace("{Feature}", feature_name.capitalize())
                         create_file(filepath, content)
                     elif filename == "{feature}.datasource.impl.dart":
@@ -229,12 +350,26 @@ def create_feature_structure(base_path, feature_name):
                     # Preenche o conteúdo do router.dart
                     content = ROUTER_TEMPLATE.replace("{feature}", feature_name).replace("{Feature}", feature_name.capitalize())
                     create_file(filepath, content)
+                elif key == "{feature}.setup.locator.dart":
+                    # Preenche o conteúdo do setup.locator.dart com o template
+                    content = SETUP_LOCATOR_TEMPLATE.replace("{feature}", feature_name).replace("{Feature}", feature_name.capitalize())
+                    create_file(filepath, content)
+                elif key == "{feature}.cubit.dart":
+                    # Preenche o conteúdo do arquivo de cubit
+                    content = CUBIT_TEMPLATE.replace("{feature}", feature_name).replace("{Feature}", feature_name.capitalize())
+                    create_file(filepath, content)
+                elif key == "{feature}.state.dart":
+                    # Preenche o conteúdo do arquivo de state
+                    content = STATE_TEMPLATE.replace("{feature}", feature_name).replace("{Feature}", feature_name.capitalize())
+                    create_file(filepath, content)
                 elif key == "{feature}.page.dart":
                     # Preenche o conteúdo do arquivo de página base
                     content = PAGE_TEMPLATE.replace("{feature}", feature_name).replace("{Feature}", feature_name.capitalize())
                     create_file(filepath, content)
                 else:
                     create_file(filepath)  # Cria arquivo vazio
+
+
 
     create_recursive(FEATURE_STRUCTURE, feature_path)
 
